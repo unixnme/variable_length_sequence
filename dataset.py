@@ -7,7 +7,7 @@ class RandomDataset(Dataset):
         self.data = []
         for idx in range(N):
             length = np.random.randint(100, 200)
-            self.data.append(np.random.randn(length))
+            self.data.append(np.random.randn(length).astype(np.float32))
 
     def __getitem__(self, index):
         return self.data[index]

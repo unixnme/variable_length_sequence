@@ -2,7 +2,8 @@ import torch
 import torch.nn.utils.rnn as rnn_utils
 from torch.utils.data.dataloader import _use_shared_memory, re, numpy_type_map, int_classes, string_classes, DataLoader
 import collections
-
+import torch.nn as nn
+import math
 
 class VariableLengthSequence(object):
     def __init__(self, seq):
@@ -15,6 +16,11 @@ class VariableLengthSequence(object):
     def __str__(self):
         return str(self.padded_seq) + '\n' + str(self.lengths)
 
+    def seq(self):
+        result = []
+        for s,l in zip(self.padded_seq, self.lengths):
+            result.append(s[...,:l])
+        return result
 
 def default_collate(batch):
     r"""Puts each data field into a tensor with outer dimension batch size"""
@@ -60,22 +66,47 @@ def default_collate(batch):
     raise TypeError((error_msg.format(type(batch[0]))))
 
 
-class VariableLengthSequenceDataLoader(DataLoader):
+class VariableLengthDataLoader(DataLoader):
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
                  num_workers=0, pin_memory=False, drop_last=False,
                  timeout=0, worker_init_fn=None):
-        super(VariableLengthSequenceDataLoader, self).__init__(dataset, batch_size, shuffle, sampler, batch_sampler,
-                                                               num_workers, default_collate, pin_memory, drop_last,
-                                                               timeout, worker_init_fn)
+        super(VariableLengthDataLoader, self).__init__(dataset, batch_size, shuffle, sampler, batch_sampler,
+                                                       num_workers, default_collate, pin_memory, drop_last,
+                                                       timeout, worker_init_fn)
 
+class VariableLengthConv1d(nn.Conv1d):
+    def forward(self, input):
+        if isinstance(input, torch.Tensor):
+            x = input
+        elif isinstance(input, VariableLengthSequence):
+            x = input.padded_seq
+            lengths = input.lengths
+        x = super(VariableLengthConv1d, self).forward(x)
+        return x
+
+    def output_length(self, input_lengths):
+        result = []
+        for input_length, padding, dilation, kernel_size, stride in zip(input_lengths, self.padding, self.dilation, self.kernel_size, self.stride):
+            num = input_length + 2*padding - dilation * (kernel_size - 1) - 1
+            denom = stride
+            result.append(math.floor(num / denom + 1))
+        return result
 
 if __name__ == '__main__':
     from dataset import RandomDataset
     from torch.utils.data import DataLoader
 
     dataset = RandomDataset()
-    dataloader = VariableLengthSequenceDataLoader(dataset, 64, True)
+    dataloader = VariableLengthDataLoader(dataset, 64, True)
 
+    conv = VariableLengthConv1d(1, 1, 3, stride=1, padding=1)
     for x in dataloader:
-        pass
+        x.padded_seq = x.padded_seq.unsqueeze(1)
+        y = conv(x)
+        for idx,x_ in enumerate(x.seq()):
+            y_ = conv(x_.unsqueeze(0))
+            output_length = conv.output_length([x_.size(-1)])[0]
+            assert y_.size(-1) == output_length
+            temp = y[[idx], ..., :output_length]
+            assert torch.all(y_ == temp)
