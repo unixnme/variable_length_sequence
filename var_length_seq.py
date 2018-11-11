@@ -15,6 +15,8 @@ class VariableLengthSequence(object):
         elif isinstance(seq, torch.Tensor):
             self.padded_seq = seq.clone()
             self.lengths = lengths.clone()
+            for idx,length in enumerate(self.lengths):
+                self.padded_seq[idx, ..., length:] = 0
 
     def __str__(self):
         return str(self.padded_seq) + '\n' + str(self.lengths)
@@ -83,13 +85,16 @@ class VariableLengthDataLoader(DataLoader):
 
 class VariableLengthConv1d(nn.Conv1d):
     def forward(self, input):
+        elem_type = type(input)
         if isinstance(input, torch.Tensor):
             x = input
-        elif isinstance(input, VariableLengthSequence):
+        elif elem_type.__name__ == 'VariableLengthSequence':
             x = input.padded_seq
             lengths = self.output_length([input.lengths])[0]
+        else:
+            raise Exception('this should not happen')
         x = super(VariableLengthConv1d, self).forward(x)
-        if isinstance(input, VariableLengthSequence):
+        if elem_type.__name__ == 'VariableLengthSequence':
             x = VariableLengthSequence(x, lengths)
         return x
 
@@ -104,16 +109,25 @@ class VariableLengthConv1d(nn.Conv1d):
 if __name__ == '__main__':
     from dataset import RandomDataset
     from torch.utils.data import DataLoader
+    from network import Network
+    from timer import Timer
 
-    dataset = RandomDataset()
-    dataloader = VariableLengthDataLoader(dataset, 64, True)
+    dataset = RandomDataset(10000)
+    input = []
+    input2 = []
+    for x in dataset:
+        input.append(torch.from_numpy(x))
+        input2.append(torch.from_numpy(x).view(1,1,-1))
 
-    conv = VariableLengthConv1d(1, 1, 3, stride=1, padding=1)
-    for x in dataloader:
-        x.padded_seq = x.padded_seq.unsqueeze(1)
-        y = conv(x)
+    network = Network()
+    with Timer():
+        for x in input2:
+            y = network(x)
 
-        for idx,x_ in enumerate(x.seq()):
-            y_ = conv(x_.unsqueeze(1))
-            length = y.lengths[idx]
-            assert torch.all(y_ == y.padded_seq[idx,...,:length])
+    input = VariableLengthSequence(input)
+    input.padded_seq.unsqueeze_(1)
+    
+    with Timer():
+        output = network(input)
+
+    pass
