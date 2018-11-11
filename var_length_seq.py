@@ -11,10 +11,13 @@ class VariableLengthSequence(object):
         :param seq: sequence of torch seq
         '''
         self.padded_seq = rnn_utils.pad_sequence(seq, batch_first=True)
-        self.lengths = [len(s) for s in seq]
+        self.lengths = torch.LongTensor([len(s) for s in seq])
 
     def __str__(self):
         return str(self.padded_seq) + '\n' + str(self.lengths)
+
+    def __len__(self):
+        return len(self.lengths)
 
     def seq(self):
         result = []
@@ -81,17 +84,21 @@ class VariableLengthConv1d(nn.Conv1d):
             x = input
         elif isinstance(input, VariableLengthSequence):
             x = input.padded_seq
-            lengths = input.lengths
+            lengths = self.output_length([input.lengths])[0]
         x = super(VariableLengthConv1d, self).forward(x)
+        if isinstance(input, VariableLengthSequence):
+            input.padded_seq = x
+            input.lengths = lengths
+            x = input
         return x
 
     def output_length(self, input_lengths):
         result = []
         for input_length, padding, dilation, kernel_size, stride in zip(input_lengths, self.padding, self.dilation, self.kernel_size, self.stride):
-            num = input_length + 2*padding - dilation * (kernel_size - 1) - 1
+            num = input_length.type(torch.float32) + 2*padding - dilation * (kernel_size - 1) - 1
             denom = stride
-            result.append(math.floor(num / denom + 1))
-        return result
+            result.append(torch.floor(num / denom + 1))
+        return torch.stack(result).type(torch.long)
 
 if __name__ == '__main__':
     from dataset import RandomDataset
@@ -104,9 +111,3 @@ if __name__ == '__main__':
     for x in dataloader:
         x.padded_seq = x.padded_seq.unsqueeze(1)
         y = conv(x)
-        for idx,x_ in enumerate(x.seq()):
-            y_ = conv(x_.unsqueeze(0))
-            output_length = conv.output_length([x_.size(-1)])[0]
-            assert y_.size(-1) == output_length
-            temp = y[[idx], ..., :output_length]
-            assert torch.all(y_ == temp)
