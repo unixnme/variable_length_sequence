@@ -3,15 +3,18 @@ import torch.nn.utils.rnn as rnn_utils
 from torch.utils.data.dataloader import _use_shared_memory, re, numpy_type_map, int_classes, string_classes, DataLoader
 import collections
 import torch.nn as nn
-import math
 
 class VariableLengthSequence(object):
-    def __init__(self, seq):
+    def __init__(self, seq, lengths=None):
         '''
         :param seq: sequence of torch seq
         '''
-        self.padded_seq = rnn_utils.pad_sequence(seq, batch_first=True)
-        self.lengths = torch.LongTensor([len(s) for s in seq])
+        if isinstance(seq, (list, tuple)):
+            self.padded_seq = rnn_utils.pad_sequence(seq, batch_first=True)
+            self.lengths = torch.LongTensor([len(s) for s in seq])
+        elif isinstance(seq, torch.Tensor):
+            self.padded_seq = seq.clone()
+            self.lengths = lengths.clone()
 
     def __str__(self):
         return str(self.padded_seq) + '\n' + str(self.lengths)
@@ -87,9 +90,7 @@ class VariableLengthConv1d(nn.Conv1d):
             lengths = self.output_length([input.lengths])[0]
         x = super(VariableLengthConv1d, self).forward(x)
         if isinstance(input, VariableLengthSequence):
-            input.padded_seq = x
-            input.lengths = lengths
-            x = input
+            x = VariableLengthSequence(x, lengths)
         return x
 
     def output_length(self, input_lengths):
@@ -111,3 +112,8 @@ if __name__ == '__main__':
     for x in dataloader:
         x.padded_seq = x.padded_seq.unsqueeze(1)
         y = conv(x)
+
+        for idx,x_ in enumerate(x.seq()):
+            y_ = conv(x_.unsqueeze(1))
+            length = y.lengths[idx]
+            assert torch.all(y_ == y.padded_seq[idx,...,:length])
