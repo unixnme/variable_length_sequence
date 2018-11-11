@@ -111,15 +111,16 @@ if __name__ == '__main__':
     from torch.utils.data import DataLoader
     from network import Network
     from timer import Timer
+    DEVICE = 'cuda'
 
     dataset = RandomDataset(10000)
     input = []
     input2 = []
     for x in dataset:
-        input.append(torch.from_numpy(x))
-        input2.append(torch.from_numpy(x).view(1,1,-1))
+        input.append(torch.from_numpy(x).to(DEVICE))
+        input2.append(torch.from_numpy(x).view(1,1,-1).to(DEVICE))
 
-    network = Network()
+    network = Network().to(DEVICE)
     with Timer():
         for x in input2:
             y = network(x)
